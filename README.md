@@ -1,0 +1,1 @@
+head -n 5 ~/src/elasticsearch-demo/items.json | cargo run 
