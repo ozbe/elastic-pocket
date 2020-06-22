@@ -1,6 +1,8 @@
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 use serde_json::error::Error;
+use futures::prelude::*;
 
 #[derive(Debug, Deserialize)]
 struct InputItem {
@@ -17,14 +19,35 @@ struct OutputItem {
 
 // Input: json pocket items
 // Output: { id, url, html }
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdin = std::io::stdin();
 
-    stdin.lock()
+    let client = Client::builder().build()?;
+    let output = futures::future::join_all(stdin.lock()
         .lines()
         .filter_map(|l| l.ok())
         .map(|l| serde_json::from_str(&l))
-        .for_each(|i: Result<InputItem, Error>| println!("{:?}", i))
+        .flat_map(|r: Result<InputItem, Error>| r.ok())
+        .map(|i| {
+            client.get(&i.resolved_url)
+                .send()
+                .and_then(|r| r.text())
+                .map(|r| match r {
+                    Ok(t) => OutputItem {
+                        item_id: i.item_id,
+                        resolved_url: i.resolved_url,
+                        html: t,
+                    },
+                    _ => panic!("uh oh"),
+                })
+                .map(|o| serde_json::to_string(&o))
+        })
+    ).await;
+    output.iter()
+        .flat_map(|o| o.as_ref().ok())
+        .for_each(|o| println!("{:?}", o));
+    Ok(())
 }
 
 /*
